@@ -1,15 +1,8 @@
 package main
 
-import (
-	"fmt"
-
-	"github.com/gwyong/learngo/banking"
-)
+import "fmt"
 
 func main() {
-	account := banking.Account{
-		Owner:   "Yong",
-		Balance: 1000}
-	fmt.Println(account)
-
+	account := accounts.NewAccount("Yong")
+	fmt.Println((account))
 }
