@@ -2,48 +2,81 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"strconv"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
-// result is a struct including url and status
-type requestResult struct {
-	url    string
-	status string
+type extractedJob struct {
+	id       string
+	location string
+	title    string
+	salary   string
+	summary  string
 }
+
+var baseURL string = "https://kr.indeed.com/jobs?q=python&limit=50"
 
 func main() {
-	results := make(map[string]string)
-	c := make(chan requestResult)
-	urls := []string{
-		"https://www.airbnb.com/",
-		"https://www.google.com/",
-		"https://www.amazon.com/",
-		"https://www.reddit.com/",
-		"https://www.facebook.com/",
-		"https://www.instagram.com/",
-		"https://soundcloud.com/",
-		"https://academy.nomadcoder.co/",
+	totalPages := getPages(baseURL)
+	for i := 0; i < totalPages; i++ {
+		getPage(i)
 	}
-	for _, url := range urls {
-		go hitURL(url, c)
-	}
+}
+func getPage(pageNum int) {
+	pageURL := baseURL + "&start=" + strconv.Itoa(pageNum*50)
+	// fmt.Println("Requesting: ", pageURL)
+	resp, err := http.Get(pageURL)
+	checkErr(err)
+	checkStatus(resp)
 
-	for i := 0; i < len(urls); i++ {
-		result := <-c
-		results[result.url] = result.status
-	}
+	defer resp.Body.Close()
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	checkErr(err)
 
-	for url, status := range results {
-		fmt.Println(url, status)
+	searchCards := doc.Find(".tapItem")
+	searchCards.Each(func(i int, card *goquery.Selection) {
+		id, _ := card.Attr("data-jk")
+		fmt.Println(id)
+		title := card.Find("h2>span").Text()
+		fmt.Println(title)
+		location := card.Find(".companyLocation").Text()
+		fmt.Println(location)
+		summary := card.Find(".job-snippet").Text()
+		fmt.Println(summary)
+	})
+}
+
+func getPages(url string) int {
+	pages := 0
+	resp, err := http.Get(baseURL)
+	checkErr(err)
+	checkStatus(resp)
+
+	defer resp.Body.Close()
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	checkErr(err)
+	doc.Find(".pagination").Each(func(i int, s *goquery.Selection) {
+		pages = (s.Find("a").Length())
+	})
+	return pages
+
+}
+
+func checkErr(err error) {
+	if err != nil {
+		log.Fatalln(err)
 	}
 }
 
-func hitURL(url string, c chan<- requestResult) {
-	resp, err := http.Get(url)
-	status := "OK"
-	if err != nil || resp.StatusCode >= 400 {
-		status = "FAILED"
-		c <- requestResult{url: url, status: status}
+func checkStatus(resp *http.Response) {
+	if resp.StatusCode != 200 {
+		log.Fatalln("Request failed with Status: ", resp.StatusCode)
 	}
-	c <- requestResult{url: url, status: status}
 }
+
+// func clearnString(txt string) string {
+
+// }
