@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -13,19 +16,59 @@ type extractedJob struct {
 	id       string
 	location string
 	title    string
-	salary   string
 	summary  string
 }
 
 var baseURL string = "https://kr.indeed.com/jobs?q=python&limit=50"
 
 func main() {
+	var jobs []extractedJob
+	c := make(chan []extractedJob)
 	totalPages := getPages(baseURL)
 	for i := 0; i < totalPages; i++ {
-		getPage(i)
+		go getPage(i, c)
+	}
+	for i := 0; i < totalPages; i++ {
+		extractedJob := <-c
+		jobs = append(jobs, extractedJob...)
+	}
+	writeJobs(jobs)
+	fmt.Println("Done. # extracted:", len(jobs))
+}
+
+func writeJobs(jobs []extractedJob) {
+	file, err := os.Create("jobs.csv")
+	checkErr(err)
+
+	w := csv.NewWriter(file)
+	defer w.Flush()
+
+	headers := []string{"ID", "TITLE", "LOCATION", "SUMMARY"}
+	wErr := w.Write(headers)
+	checkErr(wErr)
+
+	for _, job := range jobs {
+		jobSlice := []string{"https://kr.indeed.com/viewjob?jk=" + job.id, job.title, job.location, job.summary}
+		jwErr := w.Write(jobSlice)
+		checkErr(jwErr)
 	}
 }
-func getPage(pageNum int) {
+
+func extractJob(card *goquery.Selection, c chan<- extractedJob) {
+	id, _ := card.Attr("data-jk")
+	title := cleanString(card.Find("h2>span").Text())
+	location := cleanString(card.Find(".companyLocation").Text())
+	summary := card.Find(".job-snippet").Text()
+	c <- extractedJob{
+		id:       id,
+		title:    title,
+		location: location,
+		summary:  summary}
+}
+
+func getPage(pageNum int, mainC chan<- []extractedJob) {
+	var jobs []extractedJob
+	c := make(chan extractedJob)
 	pageURL := baseURL + "&start=" + strconv.Itoa(pageNum*50)
 	// fmt.Println("Requesting: ", pageURL)
 	resp, err := http.Get(pageURL)
@@ -38,15 +81,14 @@ func getPage(pageNum int) {
 
 	searchCards := doc.Find(".tapItem")
 	searchCards.Each(func(i int, card *goquery.Selection) {
-		id, _ := card.Attr("data-jk")
-		fmt.Println(id)
-		title := card.Find("h2>span").Text()
-		fmt.Println(title)
-		location := card.Find(".companyLocation").Text()
-		fmt.Println(location)
-		summary := card.Find(".job-snippet").Text()
-		fmt.Println(summary)
+		go extractJob(card, c)
 	})
+
+	for i := 0; i < searchCards.Length(); i++ {
+		job := <-c
+		jobs = append(jobs, job)
+	}
+	mainC <- jobs
 }
 
 func getPages(url string) int {
@@ -77,6 +119,6 @@ func checkStatus(resp *http.Response) {
 	}
 }
 
-// func clearnString(txt string) string {
-
-// }
+func cleanString(txt string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(txt)), " ")
+}
